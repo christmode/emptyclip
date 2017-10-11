@@ -76,6 +76,9 @@ _HUD::_HUD(_Player *Player) {
 	Images[IMAGE_PLAYERHEALTH] = Assets.GetImage("player_health_full");
 	Labels[LABEL_PLAYERHEALTH] = Assets.GetLabel("hud_player_health_text");
 
+	Elements[ELEMENT_PLAYERSTAMINA] = Assets.GetElement("hud_player_stamina");
+	Images[IMAGE_PLAYERSTAMINA] = Assets.GetImage("player_stamina_full");
+
 	Images[IMAGE_ENEMYHEALTH] = Assets.GetImage("enemy_health_full");
 
 	Elements[ELEMENT_INDICATOR] = Assets.GetElement("hud_indicator");
@@ -105,6 +108,7 @@ _HUD::_HUD(_Player *Player) {
 	Labels[LABEL_SKILL5] = Assets.GetLabel("hud_skill5_value");
 	Labels[LABEL_SKILL6] = Assets.GetLabel("hud_skill6_value");
 	Labels[LABEL_SKILL7] = Assets.GetLabel("hud_skill7_value");
+	Labels[LABEL_SKILL8] = Assets.GetLabel("hud_skill8_value");
 
 	Labels[LABEL_DAMAGE] = Assets.GetLabel("hud_player_damage_value");
 	Labels[LABEL_DAMAGEBLOCK] = Assets.GetLabel("hud_player_damageblock_value");
@@ -272,6 +276,16 @@ void _HUD::Render() {
 		Images[IMAGE_ENEMYHEALTH]->SetWidth(Elements[ELEMENT_ENEMYINFO]->GetSize().X * LastEntityHit->GetHealthPercentage());
 		Elements[ELEMENT_ENEMYINFO]->Render();
 	}
+
+	// Draw stamina
+	Images[IMAGE_PLAYERSTAMINA]->SetWidth(Elements[ELEMENT_PLAYERSTAMINA]->GetSize().X * Player->GetStaminaPercentage());
+	if(Player->GetTired())
+		Images[IMAGE_PLAYERSTAMINA]->SetColor(_Color(1.0f, 0.5f, 0.0f));
+	else
+		Images[IMAGE_PLAYERSTAMINA]->SetColor(_Color(1.0f, 1.0f, 1.0f));
+
+	if(Player->GetStaminaPercentage() < 1.0f)
+		Elements[ELEMENT_PLAYERSTAMINA]->Render();
 
 	// Draw player health
 	Buffer << Player->GetHealth() << "/" << Player->GetMaxHealth();
@@ -804,6 +818,11 @@ void _HUD::UpdateSkillInfo(int Skill, int DrawX, int DrawY) {
 			Labels[LABEL_SKILLTEXT]->SetText("Increases max inventory stack size");
 			Buffer << "+" << Assets.GetSkill(Player->GetSkill(Skill), Skill) << " Stacks";
 			BufferNext << "+" << Assets.GetSkill(Assets.GetValidSkill(Player->GetSkill(Skill)+1), Skill) << " Stacks";
+		break;
+		case SKILL_MAXSTAMINA:
+			Labels[LABEL_SKILLTEXT]->SetText("Increases max stamina");
+			Buffer << "+" << Assets.GetSkillPercentImprovement(Player->GetSkill(Skill), Skill) << "% Max Stamina";
+			BufferNext << "+" << Assets.GetSkillPercentImprovement(Assets.GetValidSkill(Player->GetSkill(Skill)+1), Skill) << "% Max Stamina";
 		break;
 	}
 

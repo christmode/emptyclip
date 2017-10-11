@@ -60,8 +60,6 @@ _Player::_Player(const std::string &SavePath) {
 
 	// Set up animations
 	LegAnimation = new _Animation();
-	LegAnimationSpeed[0] = 1;
-	LegAnimationSpeed[1] = PLAYER_CROUCHINGSPEEDFACTOR;
 	WalkingAnimation = PLAYER_ANIMATIONWALKINGONEHAND;
 	MeleeAnimation = PLAYER_ANIMATIONMELEE;
 	ShootingOnehandAnimation = PLAYER_ANIMATIONSHOOTONEHAND;
@@ -128,7 +126,7 @@ void _Player::Reset() {
 	Active = true;
 	Action = ACTION_IDLE;
 	MoveSoundDelay = 0;
-	Reloading = SwitchingWeapons = Crouching = AttackRequested = UseRequested = MedkitRequested = false;
+	Reloading = SwitchingWeapons = Crouching = Sprinting = AttackRequested = UseRequested = MedkitRequested = false;
 	AttackAllowed = true;
 	UsePeriod = PLAYER_USEPERIOD;
 	ZoomScale = PLAYER_ZOOMSCALE;
@@ -140,6 +138,7 @@ void _Player::Reset() {
 	WeaponSwitchTo = -1;
 	TimePlayed = 0;
 	PlayingTimer = 0;
+	Stamina = 100.0f;
 
 	CalculateExperienceStats();
 	CalculateLevelPercentage();
@@ -406,11 +405,6 @@ void _Player::DeleteItems() {
 	}
 }
 
-// Moves the player with wall collision detection
-void _Player::Move() {
-	_Entity::Move();
-}
-
 // Updates the entity's states
 void _Player::Update(double FrameTime) {
 	_Entity::Update(FrameTime);
@@ -419,12 +413,21 @@ void _Player::Update(double FrameTime) {
 	WeaponSwitchTimer += FrameTime;
 	ReloadTimer += FrameTime;
 	UseTimer += FrameTime;
-	MedkitTimer  += FrameTime;
+	MedkitTimer += FrameTime;
 
 	if(PlayingTimer > 1.0) {
 		TimePlayed++;
 		PlayingTimer -= 1.0;
 	}
+
+	// Update stamina
+	if(!IsDying())
+		Stamina += PLAYER_STAMINAREGEN * StaminaRegenModifier;
+
+	if(Stamina > MaxStamina)
+	   Stamina = MaxStamina;
+	if(Tired && Stamina > PLAYER_TIREDTHRESHOLD)
+		Tired = false;
 
 	// Check timer to see if the object can attack
 	if(!AttackAllowed && FireTimer >= FirePeriod) {
@@ -436,7 +439,6 @@ void _Player::Update(double FrameTime) {
 	UpdateRecoil();
 	UpdateReloading();
 	UpdateWeaponSwitch();
-	UpdateSpeed();
 
 	// Stop trigger down audio
 	if(TriggerDownAudio && (!GetAttackRequested() || !HasAmmo() || IsDying() || IsSwitchingWeapons() || IsReloading())) {
@@ -456,6 +458,15 @@ void _Player::Update(double FrameTime) {
 	}
 
 	Move();
+
+	if(Stamina > 0.0f && PositionChanged && IsSprinting()) {
+		Stamina -= PLAYER_SPRINTSTAMINA;
+		if(Stamina < 0.0f) {
+			Stamina = 0.0f;
+			SetSprinting(false);
+			Tired = true;
+		}
+	}
 
 	if(TriggerDownAudio)
 		TriggerDownAudio->SetPosition(Position);
@@ -818,12 +829,11 @@ float _Player::GetCrosshairRadius(const Vector2 &Cursor) {
 	float Distance, Accuracy;
 
 	// Check bounds
-	if(CurrentAccuracy < 0.0f)
+	Accuracy = CurrentAccuracy * AccuracyModifier;
+	if(Accuracy < 0.0f)
 		Accuracy = 0.0f;
-	else if(CurrentAccuracy > PLAYER_MAXACCURACY)
+	else if(Accuracy > PLAYER_MAXACCURACY)
 		Accuracy = PLAYER_MAXACCURACY;
-	else
-		Accuracy = CurrentAccuracy;
 
 	// Get distance to cursor
 	Distance = (Cursor - Position).Magnitude();
@@ -1053,16 +1063,23 @@ void _Player::UpdateWeaponSwitch() {
 }
 
 // Updates the states for crouching and running
-void _Player::UpdateSpeed() {
+void _Player::UpdateSpeed(float Factor) {
 
 	if(Crouching) {
-		MovementSpeed = PLAYER_MOVEMENTSPEED / PLAYER_CROUCHINGSPEEDFACTOR;
+		MovementModifier = PLAYER_CROUCHINGSPEEDFACTOR;
+	}
+	else if(Sprinting) {
+		MovementModifier = PLAYER_SPRINTINGSPEEDFACTOR;
 	}
 	else {
-		MovementSpeed = PLAYER_MOVEMENTSPEED;
+		MovementModifier = 1.0f;
 	}
+	MovementModifier *= Factor;
 
-	MoveSoundDelay = ENTITY_MOVESOUNDDELAYFACTOR / MovementSpeed;
+	MoveSoundDelay = ENTITY_MOVESOUNDDELAYFACTOR / (MovementSpeed * MovementModifier);
+	LegAnimation->SetPlaybackSpeedFactor(1.0f / MovementModifier);
+	if(Animation->GetCurrentReel() == PLAYER_ANIMATIONWALKINGONEHAND || Animation->GetCurrentReel() == PLAYER_ANIMATIONWALKINGTWOHAND)
+		SetAnimationPlaybackSpeedFactor();
 }
 
 // Updates the states for crouching
@@ -1072,34 +1089,47 @@ void _Player::SetCrouching(bool State) {
 	if(Crouching != State) {
 		Crouching = State;
 		ResetAccuracy(false);
-		LegAnimation->SetPlaybackSpeedFactor(LegAnimationSpeed[Crouching]);
-		if(Animation->GetCurrentReel() == PLAYER_ANIMATIONWALKINGONEHAND || Animation->GetCurrentReel() == PLAYER_ANIMATIONWALKINGTWOHAND)
-			SetAnimationPlaybackSpeedFactor();
+		UpdateSpeed(1.0f);
 	}
 
+	if(Crouching)
+		SetSprinting(false);
+}
+
+// Update state for sprinting
+void _Player::SetSprinting(bool State) {
+	if(State && Tired)
+		return;
+
+	// Update state
+	if(Sprinting != State) {
+		Sprinting = State;
+		ResetAccuracy(false);
+		UpdateSpeed(1.0f);
+	}
+
+	if(Sprinting)
+		SetCrouching(false);
 }
 
 // Resets the accuracy depending on crouching states
 void _Player::ResetAccuracy(bool CompleteReset) {
 
 	if(Crouching && !IsMelee()) {
-		if(CompleteReset)
-			CurrentAccuracy = MinAccuracyNormal / 2.0f;
-		else
-			CurrentAccuracy = CurrentAccuracy / 2.0f;
-
-		MinAccuracy = MinAccuracyNormal / 2.0f;
-		MaxAccuracy = MaxAccuracyNormal / 2.0f;
+		AccuracyModifier = 0.5f;
+	}
+	else if(Sprinting && !IsMelee()) {
+		AccuracyModifier = 2.0f;
 	}
 	else {
-		if(CompleteReset)
-			CurrentAccuracy = MinAccuracyNormal / 2.0f;
-		else
-			CurrentAccuracy = CurrentAccuracy * 2.0f;
+		AccuracyModifier = 1.0f;
 
-		MinAccuracy = MinAccuracyNormal;
-		MaxAccuracy = MaxAccuracyNormal;
 	}
+	if(CompleteReset)
+		CurrentAccuracy = MinAccuracyNormal;
+
+	MinAccuracy = MinAccuracyNormal;
+	MaxAccuracy = MaxAccuracyNormal;
 }
 
 // Consume an item from the inventory
@@ -1161,7 +1191,7 @@ void _Player::RecalculateStats() {
 		RecoilRegen = Weapon.RecoilRegen + Weapon.RecoilRegen * LevelPercent * PLAYER_RECOILREGENSKILLFACTOR;
 	}
 
-	// Crouching
+	// Set accuracy
 	ResetAccuracy(true);
 
 	// Attacking
@@ -1180,7 +1210,9 @@ void _Player::RecalculateStats() {
 
 	MovementSpeed = PLAYER_MOVEMENTSPEED * Assets.GetSkill(Skills[SKILL_MOVESPEED], SKILL_MOVESPEED);
 	DamageResist = Assets.GetSkill(Skills[SKILL_DAMAGERESIST], SKILL_DAMAGERESIST) - 1.0f;
-	MaxHealth = Assets.GetLevelHealth(Level) * Assets.GetSkill(Skills[SKILL_HEALTH], SKILL_HEALTH);
+	MaxHealth = (int)(Assets.GetLevelHealth(Level) * Assets.GetSkill(Skills[SKILL_HEALTH], SKILL_HEALTH));
+	MaxStamina = 1.0f * Assets.GetSkill(Skills[SKILL_MAXSTAMINA], SKILL_MAXSTAMINA);
+	StaminaRegenModifier = 1.0f * Assets.GetSkill(Skills[SKILL_MAXSTAMINA], SKILL_MAXSTAMINA);
 
 	// Armor
 	if(GetArmor()) {
@@ -1191,24 +1223,25 @@ void _Player::RecalculateStats() {
 	}
 
 	if(DebugLevel > 1) {
-		std::cout << "***RecalculateStats***\n";
-		std::cout << "AttackRange: " << Weapon.Range << " -> " << AttackRange << '\n';
-		std::cout << "MinAccuracyNormal: " << Weapon.MinAccuracy << " -> " << MinAccuracyNormal << '\n';
-		std::cout << "MaxAccuracyNormal: " << Weapon.MaxAccuracy << " -> " << MaxAccuracyNormal << '\n';
-		std::cout << "ZoomScale: " << Weapon.ZoomScale << " -> " << ZoomScale << '\n';
-		std::cout << "DamageMultiplier: " << DamageMultiplier << '\n';
-		std::cout << "Recoil: " << Weapon.Recoil << " -> " << Recoil << '\n';
-		std::cout << "RecoilRegen: " << Weapon.RecoilRegen << " -> " << RecoilRegen << '\n';
-		std::cout << "FireRate: " << Weapon.FireRate << " -> " << FireRate << '\n';
-		std::cout << "FirePeriod: " << Weapon.FirePeriod << " -> " << FirePeriod << '\n';
-		std::cout << "MinDamage: " << Weapon.MinDamage << " -> " << MinDamage << '\n';
-		std::cout << "MaxDamage: " << Weapon.MaxDamage << " -> " << MaxDamage << '\n';
-		std::cout << "BulletsShot: " << Weapon.BulletsShot << " -> " << BulletsShot << '\n';
-		std::cout << "ReloadPeriod: " << Weapon.ReloadPeriod << " -> " << ReloadPeriod << '\n';
-		std::cout << "WeaponSwitchPeriod: " << PLAYER_WEAPONSWITCHPERIOD << " -> " << WeaponSwitchPeriod << '\n';
-		std::cout << "MovementSpeed: " << PLAYER_MOVEMENTSPEED << " -> " << MovementSpeed << '\n';
-		std::cout << "DamageBlock: " << DamageBlock << '\n';
-		std::cout << "DamageResist: " << DamageResist << '\n';
+		std::cout << "Stats for " << Name << std::endl;
+		std::cout << "AttackRange: " << Weapon.Range << " -> " << AttackRange << std::endl;
+		std::cout << "MinAccuracyNormal: " << Weapon.MinAccuracy << " -> " << MinAccuracyNormal << std::endl;
+		std::cout << "MaxAccuracyNormal: " << Weapon.MaxAccuracy << " -> " << MaxAccuracyNormal << std::endl;
+		std::cout << "ZoomScale: " << Weapon.ZoomScale << " -> " << ZoomScale << std::endl;
+		std::cout << "DamageMultiplier: " << DamageMultiplier << std::endl;
+		std::cout << "Recoil: " << Weapon.Recoil << " -> " << Recoil << std::endl;
+		std::cout << "RecoilRegen: " << Weapon.RecoilRegen << " -> " << RecoilRegen << std::endl;
+		std::cout << "FireRate: " << Weapon.FireRate << " -> " << FireRate << std::endl;
+		std::cout << "FirePeriod: " << Weapon.FirePeriod << " -> " << FirePeriod << std::endl;
+		std::cout << "MinDamage: " << Weapon.MinDamage << " -> " << MinDamage << std::endl;
+		std::cout << "MaxDamage: " << Weapon.MaxDamage << " -> " << MaxDamage << std::endl;
+		std::cout << "BulletsShot: " << Weapon.BulletsShot << " -> " << BulletsShot << std::endl;
+		std::cout << "ReloadPeriod: " << Weapon.ReloadPeriod << " -> " << ReloadPeriod << std::endl;
+		std::cout << "WeaponSwitchPeriod: " << PLAYER_WEAPONSWITCHPERIOD << " -> " << WeaponSwitchPeriod << std::endl;
+		std::cout << "MovementSpeed: " << PLAYER_MOVEMENTSPEED << " -> " << MovementSpeed << std::endl;
+		std::cout << "DamageBlock: " << DamageBlock << std::endl;
+		std::cout << "DamageResist: " << DamageResist << std::endl;
+		std::cout << "MaxStamina: " << MaxStamina << std::endl;
 	}
 
 }
@@ -1281,4 +1314,4 @@ void _Player::SetArmor(_Armor *Armor) { Inventory[INVENTORY_ARMOR] = Armor; }
 void _Player::SetTorsoAnimation(const _Animation *Animation) { *this->Animation = *Animation; }
 void _Player::SetLegAnimation(const _Animation *Animation) { *this->LegAnimation = *Animation; }
 void _Player::SetLegAnimationPlayMode(int Mode) { LegAnimation->SetPlayMode(Mode); }
-void _Player::SetAnimationPlaybackSpeedFactor() { Animation->SetPlaybackSpeedFactor(LegAnimationSpeed[Crouching]); }
+void _Player::SetAnimationPlaybackSpeedFactor() { Animation->SetPlaybackSpeedFactor(1.0f / MovementModifier); }
