@@ -1,0 +1,5 @@
+Documentation: Monster.ods: There is a basic monster interface. Each monster is an implementation. 
+There are health multipliers per monster defined on granular spreadsheet. Basically, monster hp is defined by the formula: 
+=ROUND(BaseMonsterHealth*(hpScale%^(level-1))*MonsterSpecific)
+
+=ROUND($Master.B$6*($Master.B$2^(level-1))*$Gran.B$5)
