@@ -17,4 +17,4 @@ Each subsequent level requires n% more exp. HP pool scales linearly (a lot slowe
 
 
 
-Weapons.ods
+Weapons.ods. 
