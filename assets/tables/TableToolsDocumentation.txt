@@ -2,4 +2,19 @@ Documentation: Monster.ods: There is a basic monster interface. Each monster is 
 There are health multipliers per monster defined on granular spreadsheet. Basically, monster hp is defined by the formula: 
 =ROUND(BaseMonsterHealth*(hpScale%^(level-1))*MonsterSpecific)
 
-=ROUND($Master.B$6*($Master.B$2^(level-1))*$Gran.B$5)
+=ROUND($Master.B$6*($Master.B$2^(level-1))*$Gran.B$5) //Level needs to refer to the column/row in the final table that defines the level. 
+
+
+Monster Damage: Scales linearly by the number on master monster damage. Min/max damage defined by (Base+DamageIncreasePerLevel*Level)*(1+-DamageVariation)*MonsterMultiplier
+
+Experience:Basic Model. It's the square root of the hp pool. Scales slower than Exp required.
+
+
+
+
+LEVEL.ods
+Each subsequent level requires n% more exp. HP pool scales linearly (a lot slower than monster damage). OR! just don't get hit ;) too much.
+
+
+
+Weapons.ods
